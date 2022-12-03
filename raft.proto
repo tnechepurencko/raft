@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+service RaftNode {
+        rpc RequestVote(NodeArgs) returns (ResultWithTerm);
+        rpc AppendEntries(NodeArgs) returns (ResultWithTerm);
+        rpc GetLeader(NoArgs) returns (LeaderResp);
+        rpc Suspend(DurationArgs) returns (NoArgs);
+}
+
+message NoArgs {}
+
+message NodeArgs {
+        int32 term = 1;
+        int32 node_id = 2;
+}
+
+message ResultWithTerm {
+        int32 term = 1;
+        bool result = 2;
+}
+
+message DurationArgs {
+        int32 duration = 1;
+}
+
+message LeaderResp {
+        int32 leader_id = 1;
+        string leader_addr = 2;
+}
