@@ -36,9 +36,9 @@ def cmd_setvalue(key, value, state):
         return (err_msg, state1)
     resp = state1['stub'].SetValue(pb2.KeyValue(key=key, value=value))
     if resp.result:
-        return f"The key:{resp.key} was saved", state1
+        return f"The key:{key} was saved", state1
     else:
-        return f"The key:{resp.key} wasn't saved", state1
+        return f"The key:{key} wasn't saved", state1
 
 
 def cmd_getvalue(key, state):
@@ -46,7 +46,11 @@ def cmd_getvalue(key, state):
     if err_msg:
         return (err_msg, state1)
     resp = state1['stub'].GetValue(pb2.KeyValue(key=key))
-    return f"{resp.value}", state1
+    if resp.result:
+        return f"{resp.value}", state1
+    else:
+        return f"The key:{key} wasn't saved", state1
+
 
 def exec_cmd(line, state):
     parts = line.split()

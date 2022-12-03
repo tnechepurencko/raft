@@ -22,6 +22,7 @@ message Key {
 
 message Value {
         string value = 1;
+        bool result = 2;
 }
 
 message KeyValue {
@@ -29,10 +30,8 @@ message KeyValue {
         string value = 2;
 }
 
-message ResultKeyValue {
-        string key = 1;
-        string value = 2;
-        bool result = 3;
+message ResultKeyValue{
+        bool result = 1;
 }
 
 message ResultWithTerm {
