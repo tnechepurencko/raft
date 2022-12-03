@@ -3,7 +3,6 @@ import random
 import concurrent.futures
 import threading
 import time
-
 import grpc
 
 import raft_pb2_grpc as pb2_grpc
@@ -26,6 +25,10 @@ state_lock = threading.Lock()
 election_timer_fired = threading.Event()
 heartbeat_events = {}
 state = {
+    'last_applied': 0,
+    'commit_index': 0,
+    'next_index': [],
+    'match_index': [],
     'election_campaign_timer': None,
     'election_timeout': -1,
     'type': 'follower',
@@ -38,16 +41,20 @@ state = {
 
 # for debugging
 START_TIME = time.time()
+
+
 def log_prefix():
     time_since_start = '{:07.3f}'.format(time.time() - START_TIME)
     return f"{state['term']}\t{time_since_start}\t{state['type']}\t[id={state['id']} leader_id={state['leader_id']} vote_count={state['vote_count']} voted_for={state['voted_for_id']}] "
+
 
 #
 # election timer functions
 #
 
 def select_election_timeout():
-    return random.randrange(ELECTION_DURATION_FROM, ELECTION_DURATION_TO)*0.001
+    return random.randrange(ELECTION_DURATION_FROM, ELECTION_DURATION_TO) * 0.001
+
 
 # def fire_election_timer(id):
 #     state['current_timer_id'] = id
@@ -58,12 +65,15 @@ def reset_election_campaign_timer():
     state['election_campaign_timer'] = threading.Timer(state['election_timeout'], election_timer_fired.set)
     state['election_campaign_timer'].start()
 
+
 def select_new_election_timeout_duration():
     state['election_timeout'] = select_election_timeout()
+
 
 def stop_election_campaign_timer():
     if state['election_campaign_timer']:
         state['election_campaign_timer'].cancel()
+
 
 #
 # elections
@@ -87,9 +97,11 @@ def start_election():
     # lets set a timer for the end of the election
     reset_election_campaign_timer()
 
+
 def has_enough_votes():
-    required_votes = (len(state['nodes'])//2) + 1
+    required_votes = (len(state['nodes']) // 2) + 1
     return state['vote_count'] >= required_votes
+
 
 def finalize_election():
     stop_election_campaign_timer()
@@ -113,6 +125,7 @@ def finalize_election():
         select_new_election_timeout_duration()
         reset_election_campaign_timer()
 
+
 def become_a_follower():
     if state['type'] != 'follower':
         print(f"I am a follower. Term: {state['term']}")
@@ -120,6 +133,7 @@ def become_a_follower():
     state['voted_for_id'] = -1
     state['vote_count'] = 0
     # state['leader_id'] = -1
+
 
 #
 # hearbeats
@@ -129,10 +143,11 @@ def start_heartbeats():
     for id in heartbeat_events:
         heartbeat_events[id].set()
 
+
 #
 # thread functions
 #
-        
+
 def request_vote_worker_thread(id_to_request):
     ensure_connected(id_to_request)
     (_, _, stub) = state['nodes'][id_to_request]
@@ -152,12 +167,13 @@ def request_vote_worker_thread(id_to_request):
                 reset_election_campaign_timer()
             elif resp.result:
                 state['vote_count'] += 1
-        
+
         # got enough votes, no need to wait for the end of the timeout
         if has_enough_votes():
             finalize_election()
     except grpc.RpcError:
         reopen_connection(id_to_request)
+
 
 def election_timeout_thread():
     while not is_terminating:
@@ -178,6 +194,7 @@ def election_timeout_thread():
                 finalize_election()
             # if somehow we got here while being a leader,
             # then do nothing
+
 
 def heartbeat_thread(id_to_request):
     while not is_terminating:
@@ -200,9 +217,10 @@ def heartbeat_thread(id_to_request):
                         reset_election_campaign_timer()
                         state['term'] = resp.term
                         become_a_follower()
-                threading.Timer(HEARTBEAT_DURATION*0.001, heartbeat_events[id_to_request].set).start()
+                threading.Timer(HEARTBEAT_DURATION * 0.001, heartbeat_events[id_to_request].set).start()
         except grpc.RpcError:
             reopen_connection(id_to_request)
+
 
 #
 # gRPC server handler
@@ -218,25 +236,42 @@ def wake_up_after_suspend():
     else:
         reset_election_campaign_timer()
 
+
 class Handler(pb2_grpc.RaftNodeServicer):
     def RequestVote(self, request, context):
+        term = request.term
+        candidate_id = request.candidateId
+        last_log_index = request.lastLogIndex
+        last_log_term = request.lastLogTerm
+
         global is_suspended
         if is_suspended:
             return
-        
+
         reset_election_campaign_timer()
         with state_lock:
-            reply = {'result': False, 'term': state['term']}
-            if state['term'] < request.term:
-                state['term'] = request.term
-                become_a_follower()
-            if state['term'] == request.term:
-                if state['voted_for_id'] == -1:
-                    become_a_follower()
-                    state['voted_for_id'] = request.node_id
-                    reply = {'result': True, 'term': state['term']}
-                    print(f"Voted for node {state['voted_for_id']}")
+            if term < state['term'] or last_log_index < state['commit_index']:  # TODO i'm not sure about commit_index
+                reply = {'result': False, 'term': state['term']}
+            elif state['voted_for_id'] != -1:
+                reply = {'result': False, 'term': state['term']}
+            elif last_log_index == state['commit_index'] and term != last_log_term:  # TODO i'm not sure about commit_index and term
+                reply = {'result': False, 'term': state['term']}
+            else:
+                reply = {'result': True, 'term': state['term']}
             return pb2.ResultWithTerm(**reply)
+
+        # with state_lock:
+        #     reply = {'result': False, 'term': state['term']}
+        #     if state['term'] < term:
+        #         state['term'] = term
+        #         become_a_follower()
+        #     if state['term'] == term:
+        #         if state['voted_for_id'] == -1:
+        #             become_a_follower()
+        #             state['voted_for_id'] = candidate_id
+        #             reply = {'result': True, 'term': state['term']}
+        #             print(f"Voted for node {state['voted_for_id']}")
+        #     return pb2.ResultWithTerm(**reply)
 
     def AppendEntries(self, request, context):
         global is_suspended
@@ -273,6 +308,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
         threading.Timer(request.duration, wake_up_after_suspend).start()
         return pb2.NoArgs()
 
+
 #
 # other
 #
@@ -286,6 +322,7 @@ def ensure_connected(id):
         stub = pb2_grpc.RaftNodeStub(channel)
         state['nodes'][id] = (host, port, stub)
 
+
 def reopen_connection(id):
     if id == state['id']:
         raise "Shouldn't try to connect to itself"
@@ -294,6 +331,7 @@ def reopen_connection(id):
     stub = pb2_grpc.RaftNodeStub(channel)
     state['nodes'][id] = (host, port, stub)
 
+
 def start_server(state):
     (ip, port, _stub) = state['nodes'][state['id']]
     server = grpc.server(concurrent.futures.ThreadPoolExecutor(max_workers=10))
@@ -301,6 +339,7 @@ def start_server(state):
     server.add_insecure_port(f"{ip}:{port}")
     server.start()
     return server
+
 
 def main(id, nodes):
     election_th = threading.Thread(target=election_timeout_thread)
@@ -338,12 +377,11 @@ def main(id, nodes):
         [t.join() for t in hearbeat_threads]
 
 
-
 if __name__ == '__main__':
     [id] = sys.argv[1:]
     nodes = None
     with open("config.conf", 'r') as f:
-        line_parts = map(lambda line: line.split(),f.read().strip().split("\n"))
+        line_parts = map(lambda line: line.split(), f.read().strip().split("\n"))
         nodes = dict([(int(p[0]), (p[1], int(p[2]), None)) for p in line_parts])
         print(list(nodes))
     main(int(id), nodes)
