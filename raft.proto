@@ -5,6 +5,8 @@ service RaftNode {
         rpc AppendEntries(NodeArgs) returns (ResultWithTerm);
         rpc GetLeader(NoArgs) returns (LeaderResp);
         rpc Suspend(DurationArgs) returns (NoArgs);
+        rpc SetValue(KeyValue) returns (ResultKeyValue);
+        rpc GetValue(Key) returns (Value);
 }
 
 message NoArgs {}
@@ -12,6 +14,25 @@ message NoArgs {}
 message NodeArgs {
         int32 term = 1;
         int32 node_id = 2;
+}
+
+message Key {
+        string key = 1;
+}
+
+message Value {
+        string value = 1;
+}
+
+message KeyValue {
+        string key = 1;
+        string value = 2;
+}
+
+message ResultKeyValue {
+        string key = 1;
+        string value = 2;
+        bool result = 3;
 }
 
 message ResultWithTerm {
