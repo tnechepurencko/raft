@@ -30,6 +30,24 @@ def cmd_suspend(duration, state):
     state1['stub'].Suspend(pb2.DurationArgs(duration=duration))
     return "", state1
 
+def cmd_setvalue(key, value, state):
+    (err_msg, state1) = ensure_connected(state)
+    if err_msg:
+        return (err_msg, state1)
+    resp = state1['stub'].SetValue(pb2.KeyValue(key=key, value=value))
+    if resp.result:
+        return f"The key:{resp.key} was saved", state1
+    else:
+        return f"The key:{resp.key} wasn't saved", state1
+
+
+def cmd_getvalue(key, state):
+    (err_msg, state1) = ensure_connected(state)
+    if err_msg:
+        return (err_msg, state1)
+    resp = state1['stub'].GetValue(pb2.KeyValue(key=key))
+    return f"{resp.value}", state1
+
 def exec_cmd(line, state):
     parts = line.split()
     if parts[0] == 'connect':
@@ -38,6 +56,10 @@ def exec_cmd(line, state):
         return cmd_getleader(state)
     elif parts[0] == 'suspend':
         return cmd_suspend(int(parts[1]), state)
+    elif parts[0] == 'setvalue':
+        return cmd_setvalue(parts[1], parts[2], state)
+    elif parts[0] == 'getvalue':
+        return cmd_getvalue(parts[1], state)
     elif parts[0] == 'quit':
         state['working'] = False
         return "The client ends", state
@@ -45,7 +67,6 @@ def exec_cmd(line, state):
         return f"Unknown command {parts[0]}", state
 
 if __name__ == '__main__':
-    # channel = grpc.insecure_channel(f'127.0.0.1:{registry_port}')
     state = {'working': True, 'node_addr': None, 'stub': None}
     try:
         while state['working']:
