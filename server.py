@@ -274,21 +274,50 @@ class Handler(pb2_grpc.RaftNodeServicer):
         #     return pb2.ResultWithTerm(**reply)
 
     def AppendEntries(self, request, context):
+        term = request.term
+        leader_id = request.leaderId
+        prev_log_index = request.prevLogIndex
+        prev_log_term = request.prevLogTerm
+        entries = request.entries  # TODO maybe error with list
+        leader_commit = request.leaderCommit
+
         global is_suspended
         if is_suspended:
             return
 
         reset_election_campaign_timer()
-
         with state_lock:
             reply = {'result': False, 'term': state['term']}
-            if state['term'] < request.term:
-                state['term'] = request.term
+
+            # TODO if prev_log_index is not None
+            # TODO If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it
+            # TODO  Append any new entries not already in the log
+
+            if leader_commit > state['commit_index']:
+                state['commit_index'] = min(leader_commit, entries[-1])  # TODO i'm not sure about entries
+
+            if state['term'] < term:
+                state['term'] = term
                 become_a_follower()
-            if state['term'] == request.term:
-                state['leader_id'] = request.node_id
+            else:
+                state['leader_id'] = leader_id
                 reply = {'result': True, 'term': state['term']}
+
+            if int(id) == state['leader_id']:
+                if prev_log_index > next_index:
+
+
             return pb2.ResultWithTerm(**reply)
+
+        # with state_lock:
+        #     reply = {'result': False, 'term': state['term']}
+        #     if state['term'] < term:
+        #         state['term'] = term
+        #         become_a_follower()
+        #     if state['term'] == term:
+        #         state['leader_id'] = leader_id
+        #         reply = {'result': True, 'term': state['term']}
+        #     return pb2.ResultWithTerm(**reply)
 
     def GetLeader(self, request, context):
         global is_suspended
