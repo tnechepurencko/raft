@@ -1,5 +1,4 @@
 import grpc
-
 import raft_pb2_grpc as pb2_grpc
 import raft_pb2 as pb2
 
@@ -20,7 +19,7 @@ def cmd_connect(node_addr, state):
 def cmd_getleader(state):
     (err_msg, state1) = ensure_connected(state)
     if err_msg:
-        return (err_msg, state1)
+        return err_msg, state1
     resp = state1['stub'].GetLeader(pb2.NoArgs())
     return f"{resp.leader_id} {resp.leader_addr}", state1
 
@@ -28,27 +27,31 @@ def cmd_getleader(state):
 def cmd_suspend(duration, state):
     (err_msg, state1) = ensure_connected(state)
     if err_msg:
-        return (err_msg, state1)
+        return err_msg, state1
     state1['stub'].Suspend(pb2.DurationArgs(duration=duration))
     return "", state1
+
 
 def cmd_setvalue(key, value, state):
     (err_msg, state1) = ensure_connected(state)
     if err_msg:
-        return (err_msg, state1)
+        return err_msg, state1
     resp = state1['stub'].SetValue(pb2.KeyValue(key=key, value=value))
     if resp.result:
-        return f"The key:{resp.key} was saved", state1
+        return f"The key:{key} was saved", state1
     else:
-        return f"The key:{resp.key} wasn't saved", state1
+        return f"The key:{key} wasn't saved", state1
 
 
 def cmd_getvalue(key, state):
     (err_msg, state1) = ensure_connected(state)
     if err_msg:
-        return (err_msg, state1)
+        return err_msg, state1
     resp = state1['stub'].GetValue(pb2.KeyValue(key=key))
-    return f"{resp.value}", state1
+    if resp.result:
+        return f"{resp.value}", state1
+    else:
+        return f"The key:{key} wasn't saved", state1
 
 
 def exec_cmd(line, state):

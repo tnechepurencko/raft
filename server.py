@@ -374,13 +374,13 @@ def main(id, nodes):
     election_th = threading.Thread(target=election_timeout_thread)
     election_th.start()
 
-    hearbeat_threads = []
+    heartbeat_threads = []
     for node_id in nodes:
         if id != node_id:
             heartbeat_events[node_id] = threading.Event()
             t = threading.Thread(target=heartbeat_thread, args=(node_id,))
             t.start()
-            hearbeat_threads.append(t)
+            heartbeat_threads.append(t)
 
     state['id'] = id
     state['nodes'] = nodes
@@ -403,7 +403,7 @@ def main(id, nodes):
         print("Shutting down")
 
         election_th.join()
-        [t.join() for t in hearbeat_threads]
+        [t.join() for t in heartbeat_threads]
 
 
 if __name__ == '__main__':
