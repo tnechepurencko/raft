@@ -331,9 +331,21 @@ class Handler(pb2_grpc.RaftNodeServicer):
         return pb2.NoArgs()
 
 
-#
-# other
-#
+    def SetValue(self, request, context):
+        if state['type'] == 'leader':
+            try:
+                state['logs'].append(f"{request.key}={request.value}")
+                reply = {'result': True}
+                return pb2.ResultKeyValue(**reply)
+            except:
+                reply = {'result': False}
+                return pb2.ResultKeyValue(**reply)
+        elif state['type'] == 'follower':
+            reopen_connection(state['leader_id'])
+            state['nodes'][state['leader_id']][-1].SetValue(request)
+        else:
+            reply = {'result': False}
+            return pb2.ResultKeyValue(**reply)
 
 def ensure_connected(id):
     if id == state['id']:
