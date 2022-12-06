@@ -37,7 +37,7 @@ message Key {
 }
 
 message Value {
-        string value = 1;
+        optional string value = 1;
         bool result = 2;
 }
 
