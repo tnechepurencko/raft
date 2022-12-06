@@ -7,6 +7,11 @@ service RaftNode {
         rpc Suspend(DurationArgs) returns (NoArgs);
         rpc SetValue(KeyValue) returns (ResultKeyValue);
         rpc GetValue(Key) returns (Value);
+        rpc Replicate(Entry) returns (ReplicateResponse);
+}
+
+message ReplicateResponse {
+        bool result = 1;
 }
 
 message AppendEntriesRequest {
@@ -19,9 +24,9 @@ message AppendEntriesRequest {
 }
 
 message Entry {
-   int32 index = 1;
-   int32 term = 2;
-   string command = 3;
+        int32 index = 1;
+        int32 term = 2;
+        string command = 3;
 }
 
 message RequestVoteRequest {
@@ -32,11 +37,6 @@ message RequestVoteRequest {
 }
 
 message NoArgs {}
-
-message NodeArgs {
-        int32 term = 1;
-        int32 node_id = 2;
-}
 
 message Key {
         string key = 1;
