@@ -2,11 +2,20 @@ syntax = "proto3";
 
 service RaftNode {
         rpc RequestVote(RequestVoteRequest) returns (ResultWithTerm);
-        rpc AppendEntries(NodeArgs) returns (ResultWithTerm);
+        rpc AppendEntries(AppendEntriesRequest) returns (ResultWithTerm);
         rpc GetLeader(NoArgs) returns (LeaderResp);
         rpc Suspend(DurationArgs) returns (NoArgs);
         rpc SetValue(KeyValue) returns (ResultKeyValue);
         rpc GetValue(Key) returns (Value);
+}
+
+message AppendEntriesRequest {
+        int32 term = 1;
+        int32 leaderId = 2;
+        int32 prevLogIndex = 3;
+        int32 prevLogTerm = 4;
+        repeated int32 entries = 5;
+        int32 leaderCommit = 6;
 }
 
 message RequestVoteRequest {
