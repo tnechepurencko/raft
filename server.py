@@ -340,7 +340,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
     def SetValue(self, request, context):
         if state['type'] == 'leader':
             try:
-                state['logs'].append(f"{request.key}={request.value}")
+                state['logs'].append({'term': state['term'], 'update': ('set', request.key, request.value)}) # TODO Maybe yes maybe no
                 reply = {'result': True}
                 return pb2.ResultKeyValue(**reply)
             except:
@@ -352,6 +352,16 @@ class Handler(pb2_grpc.RaftNodeServicer):
         else:
             reply = {'result': False}
             return pb2.ResultKeyValue(**reply)
+
+
+    def GetValue(self, request, context):
+        for log in reversed(state['logs']):
+            if log['update'][1] == request.key:
+                reply = {'value': log['update'][2], 'result': True}
+                return  pb2.Value(**reply)
+        reply = {'result': False}
+        return pb2.Value(**reply)
+
 
 def ensure_connected(id):
     if id == state['id']:
