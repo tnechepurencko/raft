@@ -346,10 +346,19 @@ class Handler(pb2_grpc.RaftNodeServicer):
                 state['logs'].append({'index': state['last_applied'], 'term': state['term'], 'command': ('set', key, value)}) # TODO Maybe yes maybe no
 
                 # TODO replicate log
-                state['saved_keys'][key] = value
-                state['last_applied'] += 1
+                reply = {'result': False}
+                answers = []
+                for id in state['nodes'].keys():
+                    ensure_connected(id)
+                    (host, port, stub) = state['nodes'][id]
+                    msg = pb2.Entry(index=state['last_applied'], term=state['term'], command=('set', key, value))
+                    replicated = stub.Replicate(msg)
+                    answers.append(replicated.response)
 
-                reply = {'result': True}
+                if sum(answers) > len(state['nodes'].keys()) // 2:  # TODO does it really need the votes
+                    state['saved_keys'][key] = value
+                    state['last_applied'] += 1
+                    reply = {'result': True}
                 return pb2.ResultKeyValue(**reply)
             except:
                 reply = {'result': False}
@@ -361,6 +370,14 @@ class Handler(pb2_grpc.RaftNodeServicer):
             reply = {'result': False}
             return pb2.ResultKeyValue(**reply)
 
+    def Replicate(self, request, context):
+        index = request.index
+        term = request.term
+        command = request.command
+
+        state['logs'].append({'index': index, 'term': term, 'command': command})
+        reply = {'result': True}
+        return pb2.ReplicateResponse(**reply)
 
     def GetValue(self, request, context):
         key = request.key
