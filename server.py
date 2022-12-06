@@ -265,8 +265,8 @@ class Handler(pb2_grpc.RaftNodeServicer):
         term = request.term
         leader_id = request.leaderId
         prev_log_index = request.prevLogIndex
-        prev_log_term = request.prevLogTerm
-        entries = request.entries  # TODO maybe error with list
+        prev_log_term = request.prevLogTerm  # TODO SOMETHING
+        entries = request.entries  # entries = [{index, term, command}]
         leader_commit = request.leaderCommit
 
         global is_suspended
@@ -278,9 +278,15 @@ class Handler(pb2_grpc.RaftNodeServicer):
             reply = {'result': False, 'term': state['term']}
 
             if prev_log_index is not None:
-                # TODO If an existing entry conflicts with a new one (same index but different terms),
-                    # TODO delete the existing entry and all that follow it
-                # TODO  Append any new entries not already in the log
+                for entry in entries:
+                    if entry not in state['logs']:
+                        state['logs'].append(entry)
+                    else:
+                        for log in state['logs']:
+                            if entry['index'] == log['index']:
+                                if entry['term'] != log['term'] or entry['command'] != log['command']:
+                                    state['logs'].remove(log)
+                                break
 
             if leader_commit > state['commit_index']:
                 state['commit_index'] = min(leader_commit, entries[-1])  # TODO i'm not sure about entries
