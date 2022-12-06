@@ -14,8 +14,14 @@ message AppendEntriesRequest {
         int32 leaderId = 2;
         int32 prevLogIndex = 3;
         int32 prevLogTerm = 4;
-        repeated int32 entries = 5;
+        repeated Entry entries = 5;
         int32 leaderCommit = 6;
+}
+
+message Entry {
+   int32 index = 1;
+   int32 term = 2;
+   string command = 3;
 }
 
 message RequestVoteRequest {

@@ -280,13 +280,13 @@ class Handler(pb2_grpc.RaftNodeServicer):
             if prev_log_index is not None:
                 for entry in entries:
                     if entry not in state['logs']:
-                        state['logs'].append(entry)
-                    else:
                         for log in state['logs']:
                             if entry['index'] == log['index']:
                                 if entry['term'] != log['term'] or entry['command'] != log['command']:
                                     state['logs'].remove(log)
                                 break
+
+                        state['logs'].append(entry)
 
             if leader_commit > state['commit_index']:
                 state['commit_index'] = min(leader_commit, entries[-1])  # TODO i'm not sure about entries
