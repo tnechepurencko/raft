@@ -25,6 +25,7 @@ state_lock = threading.Lock()
 election_timer_fired = threading.Event()
 heartbeat_events = {}
 state = {
+    'saved_keys': {},
     'logs': [],
     'last_applied': 0,
     'commit_index': 0,
@@ -289,7 +290,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
                         state['logs'].append(entry)
 
             if leader_commit > state['commit_index']:
-                state['commit_index'] = min(leader_commit, entries[-1])  # TODO i'm not sure about entries
+                state['commit_index'] = min(leader_commit, entries[-1]['index'])  # TODO i'm not sure about entries
 
             if state['term'] < term:
                 state['term'] = term
@@ -338,9 +339,16 @@ class Handler(pb2_grpc.RaftNodeServicer):
 
 
     def SetValue(self, request, context):
+        key = request.key
+        value = request.value
         if state['type'] == 'leader':
             try:
-                state['logs'].append({'term': state['term'], 'update': ('set', request.key, request.value)}) # TODO Maybe yes maybe no
+                state['logs'].append({'index': state['last_applied'], 'term': state['term'], 'command': ('set', key, value)}) # TODO Maybe yes maybe no
+
+                # TODO replicate log
+                state['saved_keys'][key] = value
+                state['last_applied'] += 1
+
                 reply = {'result': True}
                 return pb2.ResultKeyValue(**reply)
             except:
@@ -355,10 +363,10 @@ class Handler(pb2_grpc.RaftNodeServicer):
 
 
     def GetValue(self, request, context):
-        for log in reversed(state['logs']):
-            if log['update'][1] == request.key:
-                reply = {'value': log['update'][2], 'result': True}
-                return  pb2.Value(**reply)
+        key = request.key
+        if key in state['saved_keys'].keys():
+            reply = {'value': state['saved_keys'][key], 'result': True}
+            return pb2.Value(**reply)
         reply = {'result': False}
         return pb2.Value(**reply)
 
