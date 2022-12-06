@@ -25,6 +25,7 @@ state_lock = threading.Lock()
 election_timer_fired = threading.Event()
 heartbeat_events = {}
 state = {
+    'logs': [],
     'last_applied': 0,
     'commit_index': 0,
     'next_index': [],
@@ -260,19 +261,6 @@ class Handler(pb2_grpc.RaftNodeServicer):
                 reply = {'result': True, 'term': state['term']}
             return pb2.ResultWithTerm(**reply)
 
-        # with state_lock:
-        #     reply = {'result': False, 'term': state['term']}
-        #     if state['term'] < term:
-        #         state['term'] = term
-        #         become_a_follower()
-        #     if state['term'] == term:
-        #         if state['voted_for_id'] == -1:
-        #             become_a_follower()
-        #             state['voted_for_id'] = candidate_id
-        #             reply = {'result': True, 'term': state['term']}
-        #             print(f"Voted for node {state['voted_for_id']}")
-        #     return pb2.ResultWithTerm(**reply)
-
     def AppendEntries(self, request, context):
         term = request.term
         leader_id = request.leaderId
@@ -289,9 +277,10 @@ class Handler(pb2_grpc.RaftNodeServicer):
         with state_lock:
             reply = {'result': False, 'term': state['term']}
 
-            # TODO if prev_log_index is not None
-            # TODO If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it
-            # TODO  Append any new entries not already in the log
+            if prev_log_index is not None:
+                # TODO If an existing entry conflicts with a new one (same index but different terms),
+                    # TODO delete the existing entry and all that follow it
+                # TODO  Append any new entries not already in the log
 
             if leader_commit > state['commit_index']:
                 state['commit_index'] = min(leader_commit, entries[-1])  # TODO i'm not sure about entries
@@ -305,6 +294,10 @@ class Handler(pb2_grpc.RaftNodeServicer):
 
             if int(id) == state['leader_id']:
                 if prev_log_index > next_index:
+                    # TODO send AppendEntries RPC with log entries starting at nextIndex
+                        # TODO If successful: update nextIndex and matchIndex for the follower.
+                        # TODO If AppendEntries fails because of log inconsistency: decrement nextIndex and retry
+                    # TODO If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm: set commitIndex = N
 
 
             return pb2.ResultWithTerm(**reply)
