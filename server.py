@@ -29,8 +29,8 @@ state = {
     'logs': [],
     'last_applied': 0,
     'commit_index': 0,
-    'next_index': [],
-    'match_index': [],
+    'next_index': {},
+    'match_index': {},
     'election_campaign_timer': None,
     'election_timeout': -1,
     'type': 'follower',
@@ -138,7 +138,7 @@ def become_a_follower():
 
 
 #
-# hearbeats
+# heartbeats
 #
 
 def start_heartbeats():
@@ -192,10 +192,45 @@ def election_timeout_thread():
                 start_election()
             elif state['type'] == 'candidate':
                 # okay, election is over
-                # we need to count voutes
+                # we need to count votes
                 finalize_election()
             # if somehow we got here while being a leader,
             # then do nothing
+
+def form_message(id_to_request):
+    if not state['match_index'][id_to_request]:
+        state['match_index'][id_to_request] = 0
+        state['next_index'][id_to_request] = 1
+        previous_log_term = 0
+    else:
+        previous_log_term = state['logs'][state['match_index'][id_to_request]][term]
+
+    logs_to_send = []
+
+    if state['commit_index'] >= state['next_index'][id_to_request]:
+        for log in state['logs']:
+            if log[0] > state['match_index'][id_to_request]:
+                logs_to_send.append(log)
+
+
+def max_in_dict(dictionary):
+    max = 0
+    for key in dictionary.keys():
+        if dictionary[key] > max:
+            max = dictionary[key]
+    return max
+
+def find_N(match_index):
+    N = max_in_dict(match_index)
+    count = 0
+    while N > state['commit_index']:
+        for key in match_index.keys():
+            if match_index[key] >= N:
+                count += 1
+        if count > len(state['nodes'].keys()) // 2 and state['logs'][N][term] == state['term']:
+            state['commit_index'] = N
+        else:
+            N -= 1
 
 
 def heartbeat_thread(id_to_request):
@@ -207,9 +242,23 @@ def heartbeat_thread(id_to_request):
                 if (state['type'] != 'leader') or is_suspended:
                     continue
 
+                form_message(id_to_request)
+
                 ensure_connected(id_to_request)
                 (_, _, stub) = state['nodes'][id_to_request]
-                resp = stub.AppendEntries(pb2.NodeArgs(term=state['term'], node_id=state['id']), timeout=0.100)
+
+                resp = stub.AppendEntries(
+                    pb2.AppendEntriesRequest(prevLogIndex=state['match_index'][id_to_request],
+                                             prevLogTerm=previous_log_term,
+                                             leaderCommit=state['commit_index'], entries=logs_to_send, timeout=0.100))
+
+                if resp.result:
+                    state['match_index'][id_to_request] = state['commit_index']
+                    state['next_index'][id_to_request] = state['match_index'][id_to_request] + 1
+                else:
+                    state['next_index'][id_to_request] -= 1
+
+                find_N(state['match_index'])
 
                 if (state['type'] != 'leader') or is_suspended:
                     continue
@@ -298,14 +347,6 @@ class Handler(pb2_grpc.RaftNodeServicer):
             else:
                 state['leader_id'] = leader_id
                 reply = {'result': True, 'term': state['term']}
-
-            if int(id) == state['leader_id']:
-                if prev_log_index > next_index:
-                    # TODO send AppendEntries RPC with log entries starting at nextIndex
-                        # TODO If successful: update nextIndex and matchIndex for the follower.
-                        # TODO If AppendEntries fails because of log inconsistency: decrement nextIndex and retry
-                    # TODO If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm: set commitIndex = N
-
 
             return pb2.ResultWithTerm(**reply)
 
