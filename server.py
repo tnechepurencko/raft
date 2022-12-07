@@ -299,6 +299,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
         if is_suspended:
             return
 
+
         reset_election_campaign_timer()
         with state_lock:
             if term < state['term'] or last_log_index < state['commit_index']:  # TODO i'm not sure about commit_index
