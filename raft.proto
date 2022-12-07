@@ -5,13 +5,10 @@ service RaftNode {
         rpc AppendEntries(AppendEntriesRequest) returns (ResultWithTerm);
         rpc GetLeader(NoArgs) returns (LeaderResp);
         rpc Suspend(DurationArgs) returns (NoArgs);
-        rpc SetValue(KeyValue) returns (ResultKeyValue);
+        rpc SetValue(KeyValue) returns (BoolResult);
         rpc GetValue(Key) returns (Value);
-        rpc Replicate(Entry) returns (ReplicateResponse);
-}
-
-message ReplicateResponse {
-        bool result = 1;
+        rpc Replicate(Entry) returns (BoolResult);
+        rpc ConfirmReplication(KeyValue) returns (NoArgs);
 }
 
 message AppendEntriesRequest {
@@ -52,7 +49,7 @@ message KeyValue {
         string value = 2;
 }
 
-message ResultKeyValue{
+message BoolResult{
         bool result = 1;
 }
 
