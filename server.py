@@ -154,35 +154,35 @@ def start_heartbeats():
 def request_vote_worker_thread(id_to_request):
     ensure_connected(id_to_request)
     (_, _, stub) = state['nodes'][id_to_request]
-    try:
-        index, term = 0, 0
-        if len(state['logs']) > 0:
-            index = state['logs'][-1]['index']
-            term = state['logs'][-1]['term']
+    # try:
+    index, term = 0, 0
+    if len(state['logs']) > 0:
+        index = state['logs'][-1]['index']
+        term = state['logs'][-1]['term']
 
-        msg = pb2.RequestVoteRequest(term=str(state['term']), candidateId=str(state['id']), lastLogIndex=str(index), lastLogTerm=str(term))
-        resp = stub.RequestVote(msg)
+    msg = pb2.RequestVoteRequest(term=str(state['term']), candidateId=str(state['id']), lastLogIndex=str(index), lastLogTerm=str(term))
+    resp = stub.RequestVote(msg)
 
-        with state_lock:
-            # if requested node replied for too long,
-            # and during this time candidate stopped
-            # being a candidate, then do nothing
-            if state['type'] != 'candidate' or is_suspended:
-                return
+    with state_lock:
+        # if requested node replied for too long,
+        # and during this time candidate stopped
+        # being a candidate, then do nothing
+        if state['type'] != 'candidate' or is_suspended:
+            return
 
-            if state['term'] < resp.term:
-                state['term'] = resp.term
-                become_a_follower()
-                reset_election_campaign_timer()
-            elif resp.result:
-                state['vote_count'] += 1
+        if state['term'] < resp.term:
+            state['term'] = resp.term
+            become_a_follower()
+            reset_election_campaign_timer()
+        elif resp.result:
+            state['vote_count'] += 1
 
         # got enough votes, no need to wait for the end of the timeout
         if has_enough_votes():
             finalize_election()
-    except grpc.RpcError:
-        print(f'Did not get massage from {id_to_request}')
-        reopen_connection(id_to_request)
+    # except grpc.RpcError:
+    #     print(f'Did not get massage from {id_to_request}')
+    #     reopen_connection(id_to_request)
 
 
 def election_timeout_thread():
@@ -378,16 +378,6 @@ class Handler(pb2_grpc.RaftNodeServicer):
 
             return pb2.ResultWithTerm(**reply)
 
-        # with state_lock:
-        #     reply = {'result': False, 'term': state['term']}
-        #     if state['term'] < term:
-        #         state['term'] = term
-        #         become_a_follower()
-        #     if state['term'] == term:
-        #         state['leader_id'] = leader_id
-        #         reply = {'result': True, 'term': state['term']}
-        #     return pb2.ResultWithTerm(**reply)
-
     def GetLeader(self, request, context):
         global is_suspended
         if is_suspended:
@@ -409,42 +399,57 @@ class Handler(pb2_grpc.RaftNodeServicer):
     def SetValue(self, request, context):
         key = request.key
         value = request.value
+        print('in set')
         if state['type'] == 'leader':
-            try:
-                state['logs'].append({'index': state['last_applied'] + 1, 'term': state['term'],
-                                      'command': ('set', key, value)})
-                state['last_applied'] += 1
+            # try:
 
-                # TODO replicate log
+                print('in leader')
+                state['last_applied'] += 1
+                state['logs'].append({'index': state['last_applied'] + 1,
+                                      'term': state['term'],
+                                      'command': ('set', key, value)})
+
                 reply = {'result': False}
                 answers = []
-                for id in state['nodes'].keys():
-                    ensure_connected(id)
-                    (host, port, stub) = state['nodes'][id]
-                    msg = pb2.Entry(index=state['last_applied'] + 1, term=state['term'], command=('set', key, value))
-                    replicate = stub.Replicate(msg)
-                    answers.append(replicate.response)
 
+                for id in state['nodes'].keys():
+                    print('in for')
+                    # try:
+                    if id != state['id']:
+                        ensure_connected(id)
+                        (host, port, stub) = state['nodes'][id]
+                        msg = pb2.Entry(index=state['last_applied'] + 1,
+                                        term=state['term'],
+                                        command=('set', key, value))
+                        replicate = stub.Replicate(msg)
+                        answers.append(replicate.response)
+                    # except:
+                    #     print(f'did not get massage from {id}')
+                    #     pass
+
+                print('answers')
                 if sum(answers) > len(state['nodes'].keys()) // 2:  # TODO does it really need the votes
                     state['saved_keys'][key] = value
                     state['last_applied'] += 1
                     reply = {'result': True}
                     for id in state['nodes'].keys():
-                        ensure_connected(id)
-                        (host, port, stub) = state['nodes'][id]
-                        msg = pb2.KeyValue(key=key, value=value)
-                        stub.ConfirmReplication(msg)
+                        if id != state['id']:
+                            ensure_connected(id)
+                            (host, port, stub) = state['nodes'][id]
+                            msg = pb2.KeyValue(key=key, value=value)
+                            stub.ConfirmReplication(msg)
 
-                return pb2.ResultKeyValue(**reply)
-            except:
-                reply = {'result': False}
-                return pb2.ResultKeyValue(**reply)
+                return pb2.BoolResult(**reply)
+            # except:
+            #     print('in except')
+            #     reply = {'result': False}
+            #     return pb2.BoolResult(**reply)
         elif state['type'] == 'follower':
             reopen_connection(state['leader_id'])
             state['nodes'][state['leader_id']][-1].SetValue(request)
         else:
             reply = {'result': False}
-            return pb2.ResultKeyValue(**reply)
+            return pb2.BoolResult(**reply)
 
     def Replicate(self, request, context):
         index = request.index

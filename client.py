@@ -62,9 +62,9 @@ def exec_cmd(line, state):
         return cmd_getleader(state)
     elif parts[0] == 'suspend':
         return cmd_suspend(int(parts[1]), state)
-    elif parts[0] == 'setvalue':
+    elif parts[0] == 'setval':
         return cmd_setvalue(parts[1], parts[2], state)
-    elif parts[0] == 'getvalue':
+    elif parts[0] == 'getval':
         return cmd_getvalue(parts[1], state)
     elif parts[0] == 'quit':
         state['working'] = False
