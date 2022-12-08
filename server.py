@@ -39,6 +39,7 @@ state = {
     'vote_count': 0,
     'voted_for_id': -1,
     'leader_id': -1,
+    'id': -1
 }
 
 # for debugging
@@ -159,10 +160,8 @@ def request_vote_worker_thread(id_to_request):
             index = state['logs'][-1]['index']
             term = state['logs'][-1]['term']
 
-        msg = pb2.RequestVoteRequest(term=state['term'], candidateId=state['id'], lastLogIndex=index, lastLogTerm=term)
-        print(msg.term, msg.candidateId, msg.lastLogIndex, msg.lastLogTerm)
+        msg = pb2.RequestVoteRequest(term=str(state['term']), candidateId=str(state['id']), lastLogIndex=str(index), lastLogTerm=str(term))
         resp = stub.RequestVote(msg)
-        print(id_to_request, resp.result)
 
         with state_lock:
             # if requested node replied for too long,
@@ -182,9 +181,8 @@ def request_vote_worker_thread(id_to_request):
         if has_enough_votes():
             finalize_election()
     except grpc.RpcError:
-        print('Did not get massage')
+        print(f'Did not get massage from {id_to_request}')
         reopen_connection(id_to_request)
-
 
 
 def election_timeout_thread():
@@ -207,12 +205,13 @@ def election_timeout_thread():
             # if somehow we got here while being a leader,
             # then do nothing
 
+
 def form_message(id_to_request):
-    if not state['match_index'][id_to_request]:
+    previous_log_term = 0
+    if id_to_request not in state['match_index'].keys():
         state['match_index'][id_to_request] = 0
         state['next_index'][id_to_request] = 1
-        previous_log_term = 0
-    else:
+    elif len(state['logs']) > 0:
         previous_log_term = state['logs'][state['match_index'][id_to_request]]['term']
 
     logs_to_send = []
@@ -231,6 +230,7 @@ def max_in_dict(dictionary):
         if dictionary[key] > max:
             max = dictionary[key]
     return max
+
 
 def find_N(match_index):
     N = max_in_dict(match_index)
@@ -262,7 +262,7 @@ def heartbeat_thread(id_to_request):
                 resp = stub.AppendEntries(
                     pb2.AppendEntriesRequest(prevLogIndex=state['match_index'][id_to_request],
                                              prevLogTerm=previous_log_term,
-                                             leaderCommit=state['commit_index'], entries=logs_to_send, timeout=0.100))
+                                             leaderCommit=state['commit_index'], entries=logs_to_send))
 
                 if resp.result:
                     state['match_index'][id_to_request] = state['commit_index']
@@ -302,41 +302,41 @@ def wake_up_after_suspend():
 
 class Handler(pb2_grpc.RaftNodeServicer):
     def RequestVote(self, request, context):
-        term = request.term
-        candidate_id = request.candidateId
-        last_log_index = request.lastLogIndex
-        last_log_term = request.lastLogTerm
+        term = int(request.term)
+        candidate_id = int(request.candidateId)
+        last_log_index = int(request.lastLogIndex)
+        last_log_term = int(request.lastLogTerm)
 
         global is_suspended
         if is_suspended:
             return
 
-        def last_log_index_exists():
+        def last_log_term_exists():
             for log in state['logs']:
                 if log['index'] == last_log_index:
                     return log['term']
-            return False
+            return -1
 
         reset_election_campaign_timer()
         with state_lock:
-            if term < state['term']:
-                print('term:', term, 'state term:', state['term'])
-                reply = {'result': False, 'term': state['term']}
-                print('c1')
-            elif last_log_index < state['logs'][-1]['index']:
-                reply = {'result': False, 'term': state['term']}
-                print('c2')
-            elif state['voted_for_id'] == -1:
-                reply = {'result': False, 'term': state['term']}
-                print('c3')
-            elif last_log_index_exists() != last_log_term:  # TODO i'm not sure about and term
-                reply = {'result': False, 'term': state['term']}
-                print('c4')
-            else:
-                reply = {'result': True, 'term': state['term']}
+            reply = {'result': False, 'term': state['term']}
+            if state['term'] < term:
                 state['term'] = term
+                become_a_follower()
 
-            print('requested', reply['result'])
+            if len(state['logs']) > 0:
+                if last_log_index < state['logs'][-1]['index']:
+                    return pb2.ResultWithTerm(**reply)
+                if last_log_term_exists() != last_log_term:
+                    return pb2.ResultWithTerm(**reply)
+
+            if state['term'] == term:
+                if state['voted_for_id'] == -1:
+                    become_a_follower()
+                    state['voted_for_id'] = candidate_id
+                    reply = {'result': True, 'term': state['term']}
+                    print(f"Voted for node {state['voted_for_id']}")
+
             return pb2.ResultWithTerm(**reply)
 
     def AppendEntries(self, request, context):
@@ -411,7 +411,9 @@ class Handler(pb2_grpc.RaftNodeServicer):
         value = request.value
         if state['type'] == 'leader':
             try:
-                state['logs'].append({'index': state['last_applied'], 'term': state['term'], 'command': ('set', key, value)}) # TODO Maybe yes maybe no
+                state['logs'].append({'index': state['last_applied'] + 1, 'term': state['term'],
+                                      'command': ('set', key, value)})
+                state['last_applied'] += 1
 
                 # TODO replicate log
                 reply = {'result': False}
@@ -419,7 +421,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
                 for id in state['nodes'].keys():
                     ensure_connected(id)
                     (host, port, stub) = state['nodes'][id]
-                    msg = pb2.Entry(index=state['last_applied'], term=state['term'], command=('set', key, value))
+                    msg = pb2.Entry(index=state['last_applied'] + 1, term=state['term'], command=('set', key, value))
                     replicate = stub.Replicate(msg)
                     answers.append(replicate.response)
 
@@ -458,7 +460,6 @@ class Handler(pb2_grpc.RaftNodeServicer):
         value = request.value
         state['saved_keys'][key] = value
         return pb2.NoArgs()
-
 
     def GetValue(self, request, context):
         key = request.key
