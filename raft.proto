@@ -27,10 +27,10 @@ message Entry {
 }
 
 message RequestVoteRequest {
-        int32 term = 1;
-        int32 candidateId = 2;
-        int32 lastLogIndex = 3;
-        int32 lastLogTerm = 4;
+        string term = 1;
+        string candidateId = 2;
+        string lastLogIndex = 3;
+        string lastLogTerm = 4;
 }
 
 message NoArgs {}
@@ -54,8 +54,8 @@ message BoolResult{
 }
 
 message ResultWithTerm {
-        int32 term = 1;
-        bool result = 2;
+        bool result = 1;
+        int32 term = 2;
 }
 
 message DurationArgs {
