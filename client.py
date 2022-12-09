@@ -71,6 +71,7 @@ def exec_cmd(line, state):
 
 
 if __name__ == '__main__':
+    print('The client starts')
     state = {'working': True, 'node_addr': None, 'stub': None}
     try:
         while state['working']:

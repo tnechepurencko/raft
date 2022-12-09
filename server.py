@@ -182,7 +182,6 @@ def request_vote_worker_thread(id_to_request):
         if has_enough_votes():
             finalize_election()
     except grpc.RpcError:
-        print(f'Did not get massage from {id_to_request}')
         reopen_connection(id_to_request)
 
 
@@ -219,7 +218,7 @@ def form_message(id_to_request):
 
     if state['commit_index'] >= state['next_index'][id_to_request]:
         for log in state['logs']:
-            if log[0] > state['match_index'][id_to_request]:
+            if log['index'] > state['match_index'][id_to_request]:
                 logs_to_send.append(log)
 
     return previous_log_term, logs_to_send
@@ -260,13 +259,19 @@ def heartbeat_thread(id_to_request):
                 ensure_connected(id_to_request)
                 (_, _, stub) = state['nodes'][id_to_request]
 
+                logs_msg = []
+                for log in logs_to_send:
+                    logs_msg.append(pb2.Entry(index=log['index'],
+                                              term=log['term'],
+                                              command=pb2.Command(name=log['command'][0], key=log['command'][1], value=log['command'][2])))
+
                 resp = stub.AppendEntries(
                     pb2.AppendEntriesRequest(term=state['term'],
                                              leaderId=state['leader_id'],
                                              prevLogIndex=state['match_index'][id_to_request],
                                              prevLogTerm=previous_log_term,
                                              leaderCommit=state['commit_index'],
-                                             entries=logs_to_send))
+                                             entries=logs_msg))
 
                 if resp.result:
                     state['match_index'][id_to_request] = state['commit_index']
@@ -302,6 +307,38 @@ def wake_up_after_suspend():
         start_heartbeats()
     else:
         reset_election_campaign_timer()
+
+
+def try_to_replicate_thread(key, value):
+    saved = False
+    while not saved:
+        answers = []
+        for id in state['nodes'].keys():
+            if id != state['id']:
+                try:
+                    ensure_connected(id)
+                    (host, port, stub) = state['nodes'][id]
+                    command_msg = pb2.Command(name='set', key=key, value=value)
+                    msg = pb2.Entry(index=state['last_applied'], term=state['term'], command=command_msg)
+                    reply = stub.Replicate(msg)
+                    answers.append(reply.result)
+                except:
+                    pass
+
+        if sum(answers) + 1 > len(state['nodes'].keys()) // 2:
+            saved = True
+            state['saved_keys'][key] = value
+            state['last_applied'] += 1
+
+            for id in state['nodes'].keys():
+                if id != state['id']:
+                    try:
+                        ensure_connected(id)
+                        (host, port, stub) = state['nodes'][id]
+                        msg = pb2.KeyValue(key=key, value=value)
+                        stub.ConfirmReplication(msg)
+                    except:
+                        pass
 
 
 class Handler(pb2_grpc.RaftNodeServicer):
@@ -411,29 +448,29 @@ class Handler(pb2_grpc.RaftNodeServicer):
                                       'term': state['term'],
                                       'command': ('set', key, value)})
 
-
                 reply = {'result': False}
-                answers = []
+                threading.Thread(target=try_to_replicate_thread, args=(key, value)).start()
+                # answers = []
 
-                for id in state['nodes'].keys():
-                    if id != state['id']:
-                        ensure_connected(id)
-                        (host, port, stub) = state['nodes'][id]
-                        command_msg = pb2.Command(name='set', key=key, value=value)
-                        msg = pb2.Entry(index=state['last_applied'], term=state['term'], command=command_msg)
-                        reply = stub.Replicate(msg)
-                        answers.append(reply.result)
-
-                if sum(answers) > len(state['nodes'].keys()) // 2:
-                    state['saved_keys'][key] = value
-                    state['last_applied'] += 1
-                    reply = {'result': True}
-                    for id in state['nodes'].keys():
-                        if id != state['id']:
-                            ensure_connected(id)
-                            (host, port, stub) = state['nodes'][id]
-                            msg = pb2.KeyValue(key=key, value=value)
-                            stub.ConfirmReplication(msg)
+                # for id in state['nodes'].keys():
+                #     if id != state['id']:
+                #         ensure_connected(id)
+                #         (host, port, stub) = state['nodes'][id]
+                #         command_msg = pb2.Command(name='set', key=key, value=value)
+                #         msg = pb2.Entry(index=state['last_applied'], term=state['term'], command=command_msg)
+                #         reply = stub.Replicate(msg)
+                #         answers.append(reply.result)
+                #
+                # if sum(answers) > len(state['nodes'].keys()) // 2:
+                #     state['saved_keys'][key] = value
+                #     state['last_applied'] += 1
+                #     reply = {'result': True}
+                #     for id in state['nodes'].keys():
+                #         if id != state['id']:
+                #             ensure_connected(id)
+                #             (host, port, stub) = state['nodes'][id]
+                #             msg = pb2.KeyValue(key=key, value=value)
+                #             stub.ConfirmReplication(msg)
 
                 return pb2.BoolResult(**reply)
             except:
@@ -529,11 +566,10 @@ def main(id, nodes):
     except KeyboardInterrupt:
         global is_terminating
         is_terminating = True
-        server.stop(0)
-        print("Shutting down")
-
         election_th.join()
         [t.join() for t in heartbeat_threads]
+        server.stop(0)
+        print("Shutting down")
 
 
 if __name__ == '__main__':
@@ -542,5 +578,4 @@ if __name__ == '__main__':
     with open("config.conf", 'r') as f:
         line_parts = map(lambda line: line.split(), f.read().strip().split("\n"))
         nodes = dict([(int(p[0]), (p[1], int(p[2]), None)) for p in line_parts])
-        print(list(nodes))
     main(int(id), nodes)
