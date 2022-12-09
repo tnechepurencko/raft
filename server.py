@@ -13,7 +13,7 @@ import raft_pb2 as pb2
 #
 
 # [HEARTBEAT_DURATION, ELECTION_DURATION_FROM, ELECTION_DURATION_TO] = [x*10 for x in [50, 150, 300]]
-[HEARTBEAT_DURATION, ELECTION_DURATION_FROM, ELECTION_DURATION_TO] = [x for x in [50, 5000, 6000]]
+[HEARTBEAT_DURATION, ELECTION_DURATION_FROM, ELECTION_DURATION_TO] = [x for x in [50, 150, 300]]
 
 #
 # global state
@@ -402,36 +402,29 @@ class Handler(pb2_grpc.RaftNodeServicer):
         key = request.key
         value = request.value
         if state['type'] == 'leader':
-            # try:
-                print('in set')
+            try:
                 state['last_applied'] += 1
                 state['logs'].append({'index': state['last_applied'],
                                       'term': state['term'],
                                       'command': ('set', key, value)})
 
-                print('append1')
 
                 reply = {'result': False}
                 answers = []
 
-                print('before for')
                 for id in state['nodes'].keys():
                     if id != state['id']:
                         ensure_connected(id)
                         (host, port, stub) = state['nodes'][id]
                         command_msg = pb2.Command(name='set', key=key, value=value)
                         msg = pb2.Entry(index=state['last_applied'], term=state['term'], command=command_msg)
-                        print('before replicate')
                         reply = stub.Replicate(msg)
-                        print('after replicate')
                         answers.append(reply.result)
 
-                print('after for')
                 if sum(answers) > len(state['nodes'].keys()) // 2:
                     state['saved_keys'][key] = value
                     state['last_applied'] += 1
                     reply = {'result': True}
-                    print('in if')
                     for id in state['nodes'].keys():
                         if id != state['id']:
                             ensure_connected(id)
@@ -440,12 +433,14 @@ class Handler(pb2_grpc.RaftNodeServicer):
                             stub.ConfirmReplication(msg)
 
                 return pb2.BoolResult(**reply)
-            # except:
-            #     reply = {'result': False}
-            #     return pb2.BoolResult(**reply)
+            except:
+                reply = {'result': False}
+                return pb2.BoolResult(**reply)
         elif state['type'] == 'follower':
             reopen_connection(state['leader_id'])
-            state['nodes'][state['leader_id']][-1].SetValue(request)
+            (_, _, stub) = state['nodes'][state['leader_id']]
+            reply = stub.SetValue(request)
+            return reply
         else:
             reply = {'result': False}
             return pb2.BoolResult(**reply)
@@ -455,9 +450,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
         term = request.term
         command = request.command
 
-        print('in replicate')
         state['logs'].append({'index': index, 'term': term, 'command': command})
-        print('after append')
         reply = {'result': True}
         return pb2.BoolResult(**reply)
 
