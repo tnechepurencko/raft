@@ -23,7 +23,13 @@ message AppendEntriesRequest {
 message Entry {
         int32 index = 1;
         int32 term = 2;
-        string command = 3;
+        Command command = 3;
+}
+
+message Command {
+        string name = 1;
+        string key = 2;
+        string value = 3;
 }
 
 message RequestVoteRequest {

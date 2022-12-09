@@ -160,7 +160,8 @@ def request_vote_worker_thread(id_to_request):
             index = state['logs'][-1]['index']
             term = state['logs'][-1]['term']
 
-        msg = pb2.RequestVoteRequest(term=str(state['term']), candidateId=str(state['id']), lastLogIndex=str(index), lastLogTerm=str(term))
+        msg = pb2.RequestVoteRequest(term=str(state['term']), candidateId=str(state['id']), lastLogIndex=str(index),
+                                     lastLogTerm=str(term))
         resp = stub.RequestVote(msg)
 
         with state_lock:
@@ -378,16 +379,6 @@ class Handler(pb2_grpc.RaftNodeServicer):
 
             return pb2.ResultWithTerm(**reply)
 
-        # with state_lock:
-        #     reply = {'result': False, 'term': state['term']}
-        #     if state['term'] < term:
-        #         state['term'] = term
-        #         become_a_follower()
-        #     if state['term'] == term:
-        #         state['leader_id'] = leader_id
-        #         reply = {'result': True, 'term': state['term']}
-        #     return pb2.ResultWithTerm(**reply)
-
     def GetLeader(self, request, context):
         global is_suspended
         if is_suspended:
@@ -403,6 +394,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
             return
 
         is_suspended = True
+        print(f'Suspended for {request.duration} seconds')
         threading.Timer(request.duration, wake_up_after_suspend).start()
         return pb2.NoArgs()
 
@@ -410,50 +402,64 @@ class Handler(pb2_grpc.RaftNodeServicer):
         key = request.key
         value = request.value
         if state['type'] == 'leader':
-            try:
-                state['logs'].append({'index': state['last_applied'] + 1, 'term': state['term'],
-                                      'command': ('set', key, value)})
+            # try:
+                print('in set')
                 state['last_applied'] += 1
+                state['logs'].append({'index': state['last_applied'],
+                                      'term': state['term'],
+                                      'command': ('set', key, value)})
 
-                # TODO replicate log
+                print('append1')
+
                 reply = {'result': False}
                 answers = []
-                for id in state['nodes'].keys():
-                    ensure_connected(id)
-                    (host, port, stub) = state['nodes'][id]
-                    msg = pb2.Entry(index=state['last_applied'] + 1, term=state['term'], command=('set', key, value))
-                    replicate = stub.Replicate(msg)
-                    answers.append(replicate.response)
 
-                if sum(answers) > len(state['nodes'].keys()) // 2:  # TODO does it really need the votes
+                print('before for')
+                for id in state['nodes'].keys():
+                    if id != state['id']:
+                        ensure_connected(id)
+                        (host, port, stub) = state['nodes'][id]
+                        command_msg = pb2.Command(name='set', key=key, value=value)
+                        msg = pb2.Entry(index=state['last_applied'], term=state['term'], command=command_msg)
+                        print('before replicate')
+                        reply = stub.Replicate(msg)
+                        print('after replicate')
+                        answers.append(reply.result)
+
+                print('after for')
+                if sum(answers) > len(state['nodes'].keys()) // 2:
                     state['saved_keys'][key] = value
                     state['last_applied'] += 1
                     reply = {'result': True}
+                    print('in if')
                     for id in state['nodes'].keys():
-                        ensure_connected(id)
-                        (host, port, stub) = state['nodes'][id]
-                        msg = pb2.KeyValue(key=key, value=value)
-                        stub.ConfirmReplication(msg)
+                        if id != state['id']:
+                            ensure_connected(id)
+                            (host, port, stub) = state['nodes'][id]
+                            msg = pb2.KeyValue(key=key, value=value)
+                            stub.ConfirmReplication(msg)
 
-                return pb2.ResultKeyValue(**reply)
-            except:
-                reply = {'result': False}
-                return pb2.ResultKeyValue(**reply)
+                return pb2.BoolResult(**reply)
+            # except:
+            #     reply = {'result': False}
+            #     return pb2.BoolResult(**reply)
         elif state['type'] == 'follower':
             reopen_connection(state['leader_id'])
             state['nodes'][state['leader_id']][-1].SetValue(request)
         else:
             reply = {'result': False}
-            return pb2.ResultKeyValue(**reply)
+            return pb2.BoolResult(**reply)
 
     def Replicate(self, request, context):
         index = request.index
         term = request.term
         command = request.command
 
+        print('in replicate')
         state['logs'].append({'index': index, 'term': term, 'command': command})
+        print('after append')
         reply = {'result': True}
-        return pb2.ReplicateResponse(**reply)
+        return pb2.BoolResult(**reply)
 
     def ConfirmReplication(self, request, context):
         key = request.key
