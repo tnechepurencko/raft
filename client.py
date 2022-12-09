@@ -37,21 +37,18 @@ def cmd_setvalue(key, value, state):
     if err_msg:
         return err_msg, state1
     resp = state1['stub'].SetValue(pb2.KeyValue(key=key, value=value))
-    if resp.result:
-        return f"The key:{key} was saved", state1
-    else:
-        return f"The key:{key} wasn't saved", state1
+    return "", state1
 
 
 def cmd_getvalue(key, state):
     (err_msg, state1) = ensure_connected(state)
     if err_msg:
         return err_msg, state1
-    resp = state1['stub'].GetValue(pb2.KeyValue(key=key))
+    resp = state1['stub'].GetValue(pb2.Key(key=key))
     if resp.result:
-        return f"{resp.value}", state1
+        return resp.value, state1
     else:
-        return f"The key:{key} wasn't saved", state1
+        return "None", state1
 
 
 def exec_cmd(line, state):

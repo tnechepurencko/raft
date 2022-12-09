@@ -261,9 +261,12 @@ def heartbeat_thread(id_to_request):
                 (_, _, stub) = state['nodes'][id_to_request]
 
                 resp = stub.AppendEntries(
-                    pb2.AppendEntriesRequest(prevLogIndex=state['match_index'][id_to_request],
+                    pb2.AppendEntriesRequest(term=state['term'],
+                                             leaderId=state['leader_id'],
+                                             prevLogIndex=state['match_index'][id_to_request],
                                              prevLogTerm=previous_log_term,
-                                             leaderCommit=state['commit_index'], entries=logs_to_send))
+                                             leaderCommit=state['commit_index'],
+                                             entries=logs_to_send))
 
                 if resp.result:
                     state['match_index'][id_to_request] = state['commit_index']
@@ -355,6 +358,7 @@ class Handler(pb2_grpc.RaftNodeServicer):
         reset_election_campaign_timer()
         with state_lock:
             reply = {'result': False, 'term': state['term']}
+            state['leader_id'] = leader_id
 
             if prev_log_index is not None:
                 for entry in entries:
@@ -367,14 +371,13 @@ class Handler(pb2_grpc.RaftNodeServicer):
 
                         state['logs'].append(entry)
 
-            if leader_commit > state['commit_index']:
-                state['commit_index'] = min(leader_commit, entries[-1]['index'])  # TODO i'm not sure about entries
+                if leader_commit > state['commit_index']:
+                    state['commit_index'] = min(leader_commit, entries[-1]['index'])
 
-            if state['term'] < term:
+            if state['term'] <= term:
                 state['term'] = term
-                become_a_follower()
-            else:
                 state['leader_id'] = leader_id
+                become_a_follower()
                 reply = {'result': True, 'term': state['term']}
 
             return pb2.ResultWithTerm(**reply)
